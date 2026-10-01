@@ -59,4 +59,16 @@ export const userApi = {
     );
     return response.data;
   },
+
+  uploadProfileImage: async (file: File): Promise<UserProfile> => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await apiClient.post<UserProfile>(
+      `${USER_API_PREFIX}/profile/photo`,
+      formData
+    );
+
+    return response.data;
+  },
 };

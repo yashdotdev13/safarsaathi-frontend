@@ -1,7 +1,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   ArrowLeft,
   Camera,
@@ -19,14 +19,24 @@ import {
   type UpdateUserProfileRequest,
 } from "@/lib/user/user-api";
 
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState(false);
 
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewRef = useRef<string | null>(null);
+
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     fullName: "",
@@ -60,6 +70,14 @@ export default function ProfilePage() {
     });
   };
 
+  const clearPreview = () => {
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current);
+      previewRef.current = null;
+    }
+    setPreviewUrl(null);
+  };
+
   useEffect(() => {
     let active = true;
 
@@ -91,6 +109,10 @@ export default function ProfilePage() {
 
     return () => {
       active = false;
+      if (previewRef.current) {
+        URL.revokeObjectURL(previewRef.current);
+        previewRef.current = null;
+      }
     };
   }, []);
 
@@ -102,6 +124,77 @@ export default function ProfilePage() {
       ...previous,
       [key]: value,
     }));
+  };
+
+  const handleFileSelect = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setError("");
+    setSuccess("");
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      setError("Only JPEG, PNG, and WebP images are allowed.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      setError("Image size must not exceed 5 MB.");
+      event.target.value = "";
+      return;
+    }
+
+    clearPreview();
+
+    const localUrl = URL.createObjectURL(file);
+    previewRef.current = localUrl;
+
+    setSelectedFile(file);
+    setPreviewUrl(localUrl);
+  };
+
+  const handleCancelPhoto = () => {
+    setSelectedFile(null);
+    clearPreview();
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+
+    setError("");
+  };
+
+  const handleUploadPhoto = async () => {
+    if (!selectedFile) {
+      setError("Please select an image first.");
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setError("");
+      setSuccess("");
+
+      const updatedProfile = await userApi.uploadProfileImage(selectedFile);
+
+      setProfile(updatedProfile);
+      populateForm(updatedProfile);
+
+      setSelectedFile(null);
+      clearPreview();
+
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+
+      setSuccess("Profile photo updated successfully.");
+    } catch (err) {
+      console.error("Failed to upload profile photo:", err);
+      setError("Unable to upload your photo. Please try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleCancel = () => {
@@ -122,8 +215,7 @@ export default function ProfilePage() {
       return;
     }
 
-    const parsedAge =
-      form.age.trim() === "" ? null : Number(form.age);
+    const parsedAge = form.age.trim() === "" ? null : Number(form.age);
 
     if (
       parsedAge !== null &&
@@ -178,6 +270,14 @@ export default function ProfilePage() {
     .join("")
     .toUpperCase();
 
+  const inputClass =
+    "mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#08111e] px-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-400/60 disabled:cursor-not-allowed disabled:opacity-70";
+
+  const labelClass = "text-xs font-medium text-slate-400";
+
+  const displayClass =
+    "mt-2 flex min-h-11 items-center rounded-xl border border-white/5 bg-white/[0.025] px-4 text-sm text-slate-300";
+
   if (loading) {
     return (
       <main className="flex min-h-[60vh] items-center justify-center text-slate-400">
@@ -206,14 +306,6 @@ export default function ProfilePage() {
       </main>
     );
   }
-
-  const inputClass =
-    "mt-2 h-11 w-full rounded-xl border border-white/10 bg-[#08111e] px-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-400/60 disabled:cursor-not-allowed disabled:opacity-70";
-
-  const labelClass = "text-xs font-medium text-slate-400";
-
-  const displayClass =
-    "mt-2 flex min-h-11 items-center rounded-xl border border-white/5 bg-white/[0.025] px-4 text-sm text-slate-300";
 
   return (
     <main className="min-h-screen p-5 sm:p-8 lg:p-10">
@@ -256,7 +348,7 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={handleCancel}
-                disabled={saving}
+                disabled={saving || uploading}
                 className="inline-flex h-11 items-center gap-2 rounded-xl border border-white/10 px-4 text-sm font-medium text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
               >
                 <X className="h-4 w-4" />
@@ -266,7 +358,7 @@ export default function ProfilePage() {
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={saving}
+                disabled={saving || uploading}
                 className="inline-flex h-11 items-center gap-2 rounded-xl bg-indigo-500 px-5 text-sm font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {saving ? (
@@ -295,26 +387,81 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Profile overview */}
+        {/* Profile overview and photo upload */}
         <section className="mb-6 rounded-2xl border border-white/[0.07] bg-[#0b1422] p-6 sm:p-8">
           <div className="flex flex-col gap-6 sm:flex-row sm:items-center">
-            <div className="relative flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/30 to-violet-500/20">
-              {form.profileImageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={form.profileImageUrl}
-                  alt="Profile"
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <span className="text-2xl font-bold text-indigo-200">
-                  {initials || "U"}
-                </span>
-              )}
+            <div className="flex shrink-0 flex-col items-center gap-3">
+              <div className="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-indigo-400/20 bg-gradient-to-br from-indigo-500/30 to-violet-500/20">
+                {previewUrl || form.profileImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={previewUrl || form.profileImageUrl}
+                    alt="Profile"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-2xl font-bold text-indigo-200">
+                    {initials || "U"}
+                  </span>
+                )}
 
-              <div className="absolute bottom-1 right-1 rounded-lg border border-white/10 bg-[#0b1422] p-1.5 text-slate-300">
-                <Camera className="h-3.5 w-3.5" />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                  aria-label="Choose profile photo"
+                  className="absolute bottom-1 right-1 rounded-lg border border-white/10 bg-[#0b1422] p-1.5 text-slate-300 transition hover:bg-indigo-500 hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Camera className="h-3.5 w-3.5" />
+                </button>
               </div>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleFileSelect}
+                className="hidden"
+                aria-label="Select profile photo"
+              />
+
+              <p className="text-center text-xs text-slate-500">
+                JPEG, PNG or WebP · Max 5 MB
+              </p>
+
+              {selectedFile && (
+                <div className="flex flex-col items-center gap-2">
+                  <p className="max-w-36 truncate text-xs text-slate-400">
+                    {selectedFile.name}
+                  </p>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleUploadPhoto}
+                      disabled={uploading}
+                      className="inline-flex h-9 items-center gap-2 rounded-lg bg-indigo-500 px-3 text-xs font-semibold text-white transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {uploading ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5" />
+                      )}
+                      {uploading ? "Uploading..." : "Upload"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleCancelPhoto}
+                      disabled={uploading}
+                      aria-label="Cancel photo selection"
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-white/10 px-3 text-slate-400 transition hover:bg-white/5 disabled:opacity-50"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="min-w-0">
@@ -322,15 +469,12 @@ export default function ProfilePage() {
                 {form.fullName || "Traveler"}
               </h2>
 
-              <p className="mt-1 text-sm text-slate-400">
-                {profile.email}
-              </p>
+              <p className="mt-1 text-sm text-slate-400">{profile.email}</p>
 
               <p className="mt-3 flex items-center gap-2 text-sm text-slate-400">
                 <MapPin className="h-4 w-4 text-indigo-400" />
-                {[form.city, form.country]
-                  .filter(Boolean)
-                  .join(", ") || "Location not specified"}
+                {[form.city, form.country].filter(Boolean).join(", ") ||
+                  "Location not specified"}
               </p>
             </div>
           </div>
@@ -354,9 +498,7 @@ export default function ProfilePage() {
                 <input
                   className={inputClass}
                   value={form.fullName}
-                  onChange={(e) =>
-                    updateField("fullName", e.target.value)
-                  }
+                  onChange={(e) => updateField("fullName", e.target.value)}
                   placeholder="Your full name"
                   maxLength={100}
                 />
@@ -399,9 +541,7 @@ export default function ProfilePage() {
                 <select
                   className={inputClass}
                   value={form.gender}
-                  onChange={(e) =>
-                    updateField("gender", e.target.value)
-                  }
+                  onChange={(e) => updateField("gender", e.target.value)}
                 >
                   <option value="">Select gender</option>
                   <option value="Male">Male</option>
@@ -427,9 +567,7 @@ export default function ProfilePage() {
                   max={100}
                   className={inputClass}
                   value={form.age}
-                  onChange={(e) =>
-                    updateField("age", e.target.value)
-                  }
+                  onChange={(e) => updateField("age", e.target.value)}
                   placeholder="Your age"
                 />
               ) : (
@@ -445,9 +583,7 @@ export default function ProfilePage() {
                 <input
                   className={inputClass}
                   value={form.country}
-                  onChange={(e) =>
-                    updateField("country", e.target.value)
-                  }
+                  onChange={(e) => updateField("country", e.target.value)}
                   placeholder="Country"
                 />
               ) : (
@@ -463,9 +599,7 @@ export default function ProfilePage() {
                 <input
                   className={inputClass}
                   value={form.city}
-                  onChange={(e) =>
-                    updateField("city", e.target.value)
-                  }
+                  onChange={(e) => updateField("city", e.target.value)}
                   placeholder="City"
                 />
               ) : (
@@ -481,9 +615,7 @@ export default function ProfilePage() {
                 <textarea
                   className="mt-2 min-h-28 w-full resize-y rounded-xl border border-white/10 bg-[#08111e] p-4 text-sm text-white outline-none transition placeholder:text-slate-600 focus:border-indigo-400/60"
                   value={form.bio}
-                  onChange={(e) =>
-                    updateField("bio", e.target.value)
-                  }
+                  onChange={(e) => updateField("bio", e.target.value)}
                   placeholder="Tell other travelers a little about yourself..."
                   maxLength={500}
                 />
@@ -598,26 +730,6 @@ export default function ProfilePage() {
                 </div>
               )}
             </div>
-
-            <div className="sm:col-span-2">
-              <label className={labelClass}>
-                Profile Image URL
-              </label>
-              {editing ? (
-                <input
-                  className={inputClass}
-                  value={form.profileImageUrl}
-                  onChange={(e) =>
-                    updateField("profileImageUrl", e.target.value)
-                  }
-                  placeholder="https://example.com/image.jpg"
-                />
-              ) : (
-                <div className={displayClass}>
-                  {form.profileImageUrl || "No image URL"}
-                </div>
-              )}
-            </div>
           </div>
         </section>
 
@@ -627,7 +739,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={handleCancel}
-              disabled={saving}
+              disabled={saving || uploading}
               className="h-11 rounded-xl border border-white/10 px-5 text-sm font-medium text-slate-300 transition hover:bg-white/5 disabled:opacity-50"
             >
               Discard Changes
@@ -636,7 +748,7 @@ export default function ProfilePage() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving}
+              disabled={saving || uploading}
               className="inline-flex h-11 items-center gap-2 rounded-xl bg-indigo-500 px-5 text-sm font-semibold text-white transition hover:bg-indigo-400 disabled:opacity-50"
             >
               {saving ? (

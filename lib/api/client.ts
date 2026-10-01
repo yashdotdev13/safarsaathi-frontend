@@ -7,12 +7,11 @@ export const apiClient = axios.create({
   baseURL,
   timeout: 15_000,
   headers: {
-    "Content-Type": "application/json",
     Accept: "application/json",
   },
 });
 
-// Attach JWT to outgoing requests from the browser.
+// Attach JWT and handle multipart requests.
 apiClient.interceptors.request.use(
   (config) => {
     if (typeof window !== "undefined") {
@@ -21,6 +20,12 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+    }
+
+    // Let Axios and the browser set the multipart content type
+    // and its boundary for FormData requests.
+    if (config.data instanceof FormData) {
+      config.headers.delete("Content-Type");
     }
 
     return config;
