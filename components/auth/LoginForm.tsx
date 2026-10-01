@@ -1,15 +1,57 @@
+
 "use client";
 
 import Link from "next/link";
-import { Eye, EyeOff, Lock, Mail, ArrowRight } from "lucide-react";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState, type FormEvent } from "react";
+import axios from "axios";
+import { Eye, EyeOff, Lock, Mail, ArrowRight, Loader2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { authApi } from "@/lib/auth/auth-api";
 
 export function LoginForm() {
+  const router = useRouter();
+
   const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+
+    setError("");
+    setLoading(true);
+
+    try {
+      const response = await authApi.login({
+        email,
+        password,
+      });
+
+      sessionStorage.setItem("accessToken", response.accessToken);
+
+      router.push("/dashboard");
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err)) {
+        const message = err.response?.data?.message;
+
+        setError(
+          typeof message === "string"
+            ? message
+            : "Invalid email or password. Please try again."
+        );
+      } else {
+        setError("Something went wrong. Please try again.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div className="w-full max-w-md">
@@ -29,13 +71,10 @@ export function LoginForm() {
 
       {/* Login Card */}
       <div className="rounded-2xl border border-white/10 bg-[#0b1422]/80 p-6 shadow-2xl shadow-black/20 backdrop-blur-xl sm:p-8">
-        <form className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5">
           {/* Email */}
           <div className="space-y-2">
-            <Label
-              htmlFor="email"
-              className="text-sm font-medium text-slate-200"
-            >
+            <Label htmlFor="email" className="text-sm font-medium text-slate-200">
               Email address
             </Label>
 
@@ -48,6 +87,9 @@ export function LoginForm() {
                 type="email"
                 placeholder="you@example.com"
                 autoComplete="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="h-11 border-white/10 bg-white/5 pl-10 text-white placeholder:text-slate-600 focus-visible:border-indigo-500 focus-visible:ring-indigo-500/20"
               />
             </div>
@@ -80,6 +122,9 @@ export function LoginForm() {
                 type={showPassword ? "text" : "password"}
                 placeholder="Enter your password"
                 autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 className="h-11 border-white/10 bg-white/5 pl-10 pr-10 text-white placeholder:text-slate-600 focus-visible:border-indigo-500 focus-visible:ring-indigo-500/20"
               />
 
@@ -87,9 +132,7 @@ export function LoginForm() {
                 type="button"
                 onClick={() => setShowPassword((value) => !value)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-300"
-                aria-label={
-                  showPassword ? "Hide password" : "Show password"
-                }
+                aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? (
                   <EyeOff className="h-4 w-4" />
@@ -117,24 +160,40 @@ export function LoginForm() {
             </Label>
           </div>
 
+          {/* Error */}
+          {error && (
+            <div
+              role="alert"
+              className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-300"
+            >
+              {error}
+            </div>
+          )}
+
           {/* Login */}
           <Button
             type="submit"
-            className="h-11 w-full bg-indigo-500 text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-400 hover:shadow-indigo-500/30"
+            disabled={loading}
+            className="h-11 w-full bg-indigo-500 text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-400 hover:shadow-indigo-500/30 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Sign in
-            <ArrowRight className="ml-2 h-4 w-4" />
+            {loading ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              <>
+                Sign in
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </>
+            )}
           </Button>
         </form>
 
         {/* Divider */}
         <div className="my-6 flex items-center gap-4">
           <div className="h-px flex-1 bg-white/8" />
-
-          <span className="text-xs text-slate-600">
-            OR
-          </span>
-
+          <span className="text-xs text-slate-600">OR</span>
           <div className="h-px flex-1 bg-white/8" />
         </div>
 
