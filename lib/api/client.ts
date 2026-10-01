@@ -12,4 +12,20 @@ export const apiClient = axios.create({
   },
 });
 
+// Attach JWT to outgoing requests from the browser.
+apiClient.interceptors.request.use(
+  (config) => {
+    if (typeof window !== "undefined") {
+      const token = sessionStorage.getItem("accessToken");
+
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
 export default apiClient;
