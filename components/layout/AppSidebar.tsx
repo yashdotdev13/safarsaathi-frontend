@@ -110,27 +110,26 @@ export function AppSidebar({
     return pathname.startsWith(href);
   };
 
-  const handleLogout = async () => {
-    if (loggingOut) return;
+ 
+const handleLogout = () => {
+  if (loggingOut) return;
 
-    setLoggingOut(true);
+  setLoggingOut(true);
 
-    try {
-      // Remove the locally stored JWT.
-      sessionStorage.removeItem("accessToken");
+  try {
+    // Remove the current session token.
+    sessionStorage.removeItem("accessToken");
 
-      // Clear cached data belonging to the previous session.
-      queryClient.clear();
+    // Remove cached data from the previous session.
+    queryClient.clear();
 
-      // Redirect to the login page.
-      onClose?.();
-      router.replace("/login");
-      router.refresh();
-    } catch (error) {
-      console.error("Logout failed:", error);
-      setLoggingOut(false);
-    }
-  };
+    // Navigate using a full page replacement.
+    window.location.replace("/login");
+  } catch (error) {
+    console.error("Logout failed:", error);
+    setLoggingOut(false);
+  }
+};
 
   return (
     <>
