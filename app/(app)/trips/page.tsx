@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   ArrowRight,
   CalendarDays,
@@ -12,85 +13,186 @@ import {
   Plus,
   Search,
   Users,
+  Wallet,
+  RefreshCw,
 } from "lucide-react";
 
-const trips = [
-  {
-    id: "1",
-    destination: "Manali",
-    country: "India",
-    dates: "Dec 12 – Dec 17, 2026",
-    duration: "5 days",
-    travelers: 2,
-    status: "Planning",
-    style: "Adventure",
-    image: "/images/dashboard/manali.jpg",
-    description: "A mountain escape filled with scenic views and adventure.",
-  },
-  {
-    id: "2",
-    destination: "Jaipur",
-    country: "India",
-    dates: "Jan 08 – Jan 11, 2027",
-    duration: "3 days",
-    travelers: 3,
-    status: "Upcoming",
-    style: "Culture",
-    image: "/images/dashboard/jaipur.jpg",
-    description: "Explore royal architecture, local food, and vibrant markets.",
-  },
-  {
-    id: "3",
-    destination: "Goa",
-    country: "India",
-    dates: "Feb 14 – Feb 18, 2027",
-    duration: "4 days",
-    travelers: 2,
-    status: "Planning",
-    style: "Leisure",
-    image: "/images/dashboard/goa.jpg",
-    description: "A relaxed coastal getaway with beaches and sunsets.",
-  },
+import { tripApi, type Trip } from "@/lib/trip/trip-api";
+
+const filters = [
+  "All",
+  "Planning",
+  "Upcoming",
+  "Ongoing",
+  "Completed",
+  "Cancelled",
 ];
 
-const filters = ["All", "Planning", "Upcoming", "Completed"];
+const FALLBACK_IMAGE = "/images/dashboard/manali.jpg";
 
-function statusStyles(status: string) {
+// Use images already available in the public directory.
+// Add more destinations here as you add matching image files.
+const destinationImages: Record<string, string> = {
+  manali: "/images/dashboard/manali.jpg",
+  jaipur: "/images/dashboard/jaipur.jpg",
+  goa: "/images/dashboard/goa.jpg",
+};
+
+function getDestinationImage(destination: string): string {
+  return (
+    destinationImages[destination.trim().toLowerCase()] ??
+    FALLBACK_IMAGE
+  );
+}
+
+function getTripStatus(trip: Trip): string {
+  switch (trip.status) {
+    case "ONGOING":
+      return "Ongoing";
+    case "COMPLETED":
+      return "Completed";
+    case "CANCELLED":
+      return "Cancelled";
+    case "PLANNED": {
+      const startDate = new Date(trip.startDate);
+      const now = new Date();
+
+      return startDate > now ? "Upcoming" : "Planning";
+    }
+    default:
+      return "Planning";
+  }
+}
+
+function statusStyles(status: string): string {
   switch (status) {
     case "Upcoming":
       return "border-cyan-400/20 bg-cyan-400/10 text-cyan-300";
+    case "Ongoing":
+      return "border-indigo-400/20 bg-indigo-400/10 text-indigo-300";
     case "Completed":
       return "border-emerald-400/20 bg-emerald-400/10 text-emerald-300";
+    case "Cancelled":
+      return "border-red-400/20 bg-red-400/10 text-red-300";
     default:
       return "border-amber-400/20 bg-amber-400/10 text-amber-300";
   }
+}
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+
+  if (Number.isNaN(date.getTime())) {
+    return "Date unavailable";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(date);
+}
+
+function getDateRange(startDate: string, endDate: string): string {
+  return `${formatDate(startDate)} – ${formatDate(endDate)}`;
+}
+
+function getDuration(startDate: string, endDate: string): string {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return "N/A";
+  }
+
+  const days = Math.max(
+    1,
+    Math.ceil(
+      (Date.UTC(
+        end.getFullYear(),
+        end.getMonth(),
+        end.getDate()
+      ) -
+        Date.UTC(
+          start.getFullYear(),
+          start.getMonth(),
+          start.getDate()
+        )) /
+        (1000 * 60 * 60 * 24)
+    )
+  );
+
+  return `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+function getTravelStyle(mode: Trip["modeOfTravel"]): string {
+  const labels: Record<Trip["modeOfTravel"], string> = {
+    BUS: "Bus",
+    TRAIN: "Train",
+    FLIGHT: "Flight",
+    BIKE: "Bike",
+    CAR: "Car",
+    OTHER: "Other",
+  };
+
+  return labels[mode] ?? "Other";
 }
 
 export default function TripsPage() {
   const [activeFilter, setActiveFilter] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredTrips = useMemo(() => {
-    return trips.filter((trip) => {
-      const matchesFilter =
-        activeFilter === "All" || trip.status === activeFilter;
+  const {
+    data: trips = [],
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useQuery({
+    queryKey: ["my-trips"],
+    queryFn: tripApi.getMyTrips,
+  });
 
-      const query = searchQuery.toLowerCase();
+  const tripsWithStatus = useMemo(
+    () =>
+      trips.map((trip) => ({
+        ...trip,
+        displayStatus: getTripStatus(trip),
+      })),
+    [trips]
+  );
+
+  const filteredTrips = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return tripsWithStatus.filter((trip) => {
+      const matchesFilter =
+        activeFilter === "All" ||
+        trip.displayStatus === activeFilter;
+
       const matchesSearch =
+        !query ||
         trip.destination.toLowerCase().includes(query) ||
-        trip.country.toLowerCase().includes(query) ||
-        trip.style.toLowerCase().includes(query);
+        trip.origin.toLowerCase().includes(query) ||
+        trip.description?.toLowerCase().includes(query) ||
+        getTravelStyle(trip.modeOfTravel)
+          .toLowerCase()
+          .includes(query);
 
       return matchesFilter && matchesSearch;
     });
-  }, [activeFilter, searchQuery]);
+  }, [tripsWithStatus, activeFilter, searchQuery]);
 
-  const planningCount = trips.filter(
-    (trip) => trip.status === "Planning"
+  const planningCount = tripsWithStatus.filter(
+    (trip) => trip.displayStatus === "Planning"
   ).length;
 
-  const upcomingCount = trips.filter(
-    (trip) => trip.status === "Upcoming"
+  const upcomingCount = tripsWithStatus.filter(
+    (trip) => trip.displayStatus === "Upcoming"
+  ).length;
+
+  const ongoingCount = tripsWithStatus.filter(
+    (trip) => trip.displayStatus === "Ongoing"
   ).length;
 
   return (
@@ -108,8 +210,8 @@ export default function TripsPage() {
           </h1>
 
           <p className="mt-2 max-w-xl text-sm leading-6 text-slate-400">
-            Organize your journeys, manage your plans, and get ready for
-            your next adventure.
+            Organize your journeys, manage your plans, and get ready
+            for your next adventure.
           </p>
         </div>
 
@@ -124,50 +226,29 @@ export default function TripsPage() {
 
       {/* Summary cards */}
       <section className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-2xl border border-white/8 bg-[#0b1422] p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-400">Total trips</p>
-            <div className="rounded-xl bg-indigo-400/10 p-2.5 text-indigo-300">
-              <Compass className="h-4 w-4" />
-            </div>
-          </div>
-          <p className="mt-4 text-3xl font-semibold text-white">
-            {trips.length}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Across all your journeys
-          </p>
-        </div>
+        <SummaryCard
+          label="Total trips"
+          value={isLoading ? "—" : trips.length}
+          description="Across all your journeys"
+          icon={<Compass className="h-4 w-4" />}
+          iconClass="bg-indigo-400/10 text-indigo-300"
+        />
 
-        <div className="rounded-2xl border border-white/8 bg-[#0b1422] p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-400">In planning</p>
-            <div className="rounded-xl bg-amber-400/10 p-2.5 text-amber-300">
-              <CalendarDays className="h-4 w-4" />
-            </div>
-          </div>
-          <p className="mt-4 text-3xl font-semibold text-white">
-            {planningCount}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Adventures being organized
-          </p>
-        </div>
+        <SummaryCard
+          label="In planning"
+          value={isLoading ? "—" : planningCount}
+          description="Adventures being organized"
+          icon={<CalendarDays className="h-4 w-4" />}
+          iconClass="bg-amber-400/10 text-amber-300"
+        />
 
-        <div className="rounded-2xl border border-white/8 bg-[#0b1422] p-5">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-slate-400">Upcoming</p>
-            <div className="rounded-xl bg-cyan-400/10 p-2.5 text-cyan-300">
-              <Clock3 className="h-4 w-4" />
-            </div>
-          </div>
-          <p className="mt-4 text-3xl font-semibold text-white">
-            {upcomingCount}
-          </p>
-          <p className="mt-1 text-xs text-slate-500">
-            Trips on your calendar
-          </p>
-        </div>
+        <SummaryCard
+          label="Upcoming"
+          value={isLoading ? "—" : upcomingCount}
+          description="Future trips on your calendar"
+          icon={<Clock3 className="h-4 w-4" />}
+          iconClass="bg-cyan-400/10 text-cyan-300"
+        />
       </section>
 
       {/* Search and filters */}
@@ -175,6 +256,7 @@ export default function TripsPage() {
         <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div className="relative w-full lg:max-w-sm">
             <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+
             <input
               type="search"
               value={searchQuery}
@@ -202,88 +284,139 @@ export default function TripsPage() {
           </div>
         </div>
 
+        {/* Loading state */}
+        {isLoading && (
+          <div className="grid gap-5 xl:grid-cols-2">
+            {[1, 2].map((item) => (
+              <div
+                key={item}
+                className="animate-pulse overflow-hidden rounded-2xl border border-white/8 bg-[#0b1422]"
+              >
+                <div className="h-52 bg-white/5 sm:h-60" />
+                <div className="space-y-4 p-5">
+                  <div className="h-4 w-2/3 rounded bg-white/5" />
+                  <div className="h-4 w-1/2 rounded bg-white/5" />
+                  <div className="h-16 rounded bg-white/5" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Error state */}
+        {isError && !isLoading && (
+          <div className="flex flex-col items-center rounded-2xl border border-red-400/20 bg-[#0b1422] px-6 py-12 text-center">
+            <div className="rounded-2xl bg-red-400/10 p-4 text-red-300">
+              <RefreshCw className="h-6 w-6" />
+            </div>
+
+            <h3 className="mt-5 text-lg font-semibold text-white">
+              Couldn't load your trips
+            </h3>
+
+            <p className="mt-2 max-w-sm text-sm leading-6 text-slate-400">
+              {error instanceof Error
+                ? error.message
+                : "Something went wrong while fetching your trips."}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Try again
+            </button>
+          </div>
+        )}
+
         {/* Trip cards */}
-        {filteredTrips.length > 0 ? (
+        {!isLoading && !isError && filteredTrips.length > 0 && (
           <div className="grid gap-5 xl:grid-cols-2">
             {filteredTrips.map((trip) => (
               <article
                 key={trip.id}
                 className="group overflow-hidden rounded-2xl border border-white/8 bg-[#0b1422] transition duration-300 hover:-translate-y-0.5 hover:border-indigo-400/20"
               >
+                {/* Destination image */}
                 <div className="relative h-52 overflow-hidden sm:h-60">
                   <div
                     className="absolute inset-0 bg-cover bg-center transition-transform duration-700 group-hover:scale-105"
-                    style={{ backgroundImage: `url('${trip.image}')` }}
+                    style={{
+                      backgroundImage: `url("${getDestinationImage(
+                        trip.destination
+                      )}")`,
+                    }}
                   />
+
                   <div className="absolute inset-0 bg-gradient-to-t from-[#07101d] via-black/10 to-black/20" />
 
                   <span
-                    className={`absolute left-4 top-4 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md ${statusStyles(trip.status)}`}
+                    className={`absolute left-4 top-4 rounded-full border px-3 py-1.5 text-xs font-medium backdrop-blur-md ${statusStyles(
+                      trip.displayStatus
+                    )}`}
                   >
-                    {trip.status}
+                    {trip.displayStatus}
                   </span>
 
                   <div className="absolute bottom-4 left-5 right-5">
                     <p className="flex items-center gap-1.5 text-xs text-white/75">
                       <MapPin className="h-3.5 w-3.5" />
-                      {trip.country}
+                      {trip.origin} to {trip.destination}
                     </p>
+
                     <h2 className="mt-1 text-2xl font-semibold text-white">
                       {trip.destination}
                     </h2>
                   </div>
                 </div>
 
+                {/* Trip details */}
                 <div className="space-y-5 p-5">
                   <p className="text-sm leading-6 text-slate-400">
-                    {trip.description}
+                    {trip.description ||
+                      `Your journey from ${trip.origin} to ${trip.destination}.`}
                   </p>
 
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="flex items-start gap-2.5">
-                      <CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
-                      <div>
-                        <p className="text-xs text-slate-500">Travel dates</p>
-                        <p className="mt-1 text-xs font-medium text-slate-200">
-                          {trip.dates}
-                        </p>
-                      </div>
-                    </div>
+                    <DetailItem
+                      icon={<CalendarDays className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />}
+                      label="Travel dates"
+                      value={getDateRange(
+                        trip.startDate,
+                        trip.endDate
+                      )}
+                    />
 
-                    <div className="flex items-start gap-2.5">
-                      <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
-                      <div>
-                        <p className="text-xs text-slate-500">Duration</p>
-                        <p className="mt-1 text-xs font-medium text-slate-200">
-                          {trip.duration}
-                        </p>
-                      </div>
-                    </div>
+                    <DetailItem
+                      icon={<Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />}
+                      label="Duration"
+                      value={getDuration(
+                        trip.startDate,
+                        trip.endDate
+                      )}
+                    />
 
-                    <div className="flex items-start gap-2.5">
-                      <Users className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
-                      <div>
-                        <p className="text-xs text-slate-500">Travelers</p>
-                        <p className="mt-1 text-xs font-medium text-slate-200">
-                          {trip.travelers} travelers
-                        </p>
-                      </div>
-                    </div>
+                    <DetailItem
+                      icon={<Users className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />}
+                      label="Travelers"
+                      value={`${trip.currentTravelers} / ${trip.maxTravelers}`}
+                    />
 
-                    <div className="flex items-start gap-2.5">
-                      <Compass className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />
-                      <div>
-                        <p className="text-xs text-slate-500">Travel style</p>
-                        <p className="mt-1 text-xs font-medium text-slate-200">
-                          {trip.style}
-                        </p>
-                      </div>
-                    </div>
+                    <DetailItem
+                      icon={<Compass className="mt-0.5 h-4 w-4 shrink-0 text-indigo-400" />}
+                      label="Travel mode"
+                      value={getTravelStyle(trip.modeOfTravel)}
+                    />
                   </div>
 
                   <div className="flex items-center justify-between border-t border-white/8 pt-4">
-                    <span className="text-xs text-slate-500">
-                      Your next journey awaits
+                    <span className="flex items-center gap-1.5 text-xs text-slate-500">
+                      <Wallet className="h-3.5 w-3.5" />
+                      {trip.estimatedCost != null
+                        ? `₹${trip.estimatedCost.toLocaleString("en-IN")}`
+                        : "Budget not set"}
                     </span>
 
                     <Link
@@ -298,28 +431,94 @@ export default function TripsPage() {
               </article>
             ))}
           </div>
-        ) : (
+        )}
+
+        {/* Empty state */}
+        {!isLoading && !isError && filteredTrips.length === 0 && (
           <div className="flex flex-col items-center rounded-2xl border border-dashed border-white/10 bg-[#0b1422]/60 px-6 py-16 text-center">
             <div className="rounded-2xl bg-indigo-400/10 p-4 text-indigo-300">
               <Compass className="h-6 w-6" />
             </div>
+
             <h3 className="mt-5 text-lg font-semibold text-white">
-              No trips found
+              {trips.length === 0
+                ? "No trips yet"
+                : "No trips found"}
             </h3>
+
             <p className="mt-2 max-w-sm text-sm leading-6 text-slate-400">
-              Try a different search or filter, or create a new trip to
-              start planning your next adventure.
+              {trips.length === 0
+                ? "Your next adventure starts here. Create your first trip and begin planning."
+                : "Try a different search or filter to find your journeys."}
             </p>
-            <Link
-              href="/trips/create"
-              className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400"
-            >
-              <Plus className="h-4 w-4" />
-              Create trip
-            </Link>
+
+            {trips.length === 0 && (
+              <Link
+                href="/trips/create"
+                className="mt-5 inline-flex items-center gap-2 rounded-xl bg-indigo-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-400"
+              >
+                <Plus className="h-4 w-4" />
+                Create trip
+              </Link>
+            )}
           </div>
         )}
       </section>
+    </div>
+  );
+}
+
+function SummaryCard({
+  label,
+  value,
+  description,
+  icon,
+  iconClass,
+}: {
+  label: string;
+  value: string | number;
+  description: string;
+  icon: React.ReactNode;
+  iconClass: string;
+}) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-[#0b1422] p-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-slate-400">{label}</p>
+        <div className={`rounded-xl p-2.5 ${iconClass}`}>
+          {icon}
+        </div>
+      </div>
+
+      <p className="mt-4 text-3xl font-semibold text-white">
+        {value}
+      </p>
+
+      <p className="mt-1 text-xs text-slate-500">
+        {description}
+      </p>
+    </div>
+  );
+}
+
+function DetailItem({
+  icon,
+  label,
+  value,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-2.5">
+      {icon}
+      <div className="min-w-0">
+        <p className="text-xs text-slate-500">{label}</p>
+        <p className="mt-1 break-words text-xs font-medium text-slate-200">
+          {value}
+        </p>
+      </div>
     </div>
   );
 }
