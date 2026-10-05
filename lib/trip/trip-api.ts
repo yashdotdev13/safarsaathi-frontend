@@ -1,8 +1,6 @@
 
 import apiClient from "@/lib/api/client";
 
-// ─── Types ──────────────────────────────────────────────
-
 export type ModeOfTravel =
   | "BUS"
   | "TRAIN"
@@ -81,8 +79,6 @@ export interface PageResponse<T> {
   last: boolean;
   empty: boolean;
 }
-
-// ─── API ───────────────────────────────────────────────
 
 const BASE_URL = "/api/v1/trip/core";
 
